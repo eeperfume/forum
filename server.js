@@ -137,35 +137,30 @@ app.get("/write", (req, resp) => {
   resp.render("write.ejs");
 });
 
-app.post("/add", async (req, resp) => {
+app.post("/add", upload.single("img1"), async (req, resp) => {
   // app.post("/add", upload.array("img1", 2), async (req, resp) => {
   // console.log(req.file); // upload.single() 업로드 완료 시 이미지의 URL은 이 안에 들어있음
   // console.log(req.files); // upload.array() 업로드 완료 시 이미지의 URL은 이 안에 들어있음
   // console.log(req.body);
-  upload.single("img1")(req, resp, (err) => {
-    if (err) return resp.send("업로드 에러");
-    console.log(req.file);
-
-    try {
-      if ("" == req.body.title) {
-        return resp.send("제목이 입력되지 않았습니다.");
-      }
-      if ("" == req.body.content) {
-        return resp.send("내용이 입력되지 않았습니다.");
-      }
-      // throw new Exception("강제로 예외를 발생시켰습니다.");
-      let result = await db.collection("post").insertOne({
-        title: req.body.title,
-        content: req.body.content,
-        img: location,
-      });
-      console.log(`result: ${result}`);
-      resp.redirect("/list");
-    } catch (e) {
-      console.log(e);
-      resp.status(500).send("서버에서 오류가 발생했습니다.");
+  try {
+    if ("" == req.body.title) {
+      return resp.send("제목이 입력되지 않았습니다.");
     }
-  });
+    if ("" == req.body.content) {
+      return resp.send("내용이 입력되지 않았습니다.");
+    }
+    // throw new Exception("강제로 예외를 발생시켰습니다.");
+    let result = await db.collection("post").insertOne({
+      title: req.body.title,
+      content: req.body.content,
+      img: req.file.location,
+    });
+    console.log(`result: ${result}`);
+    resp.redirect("/list");
+  } catch (e) {
+    console.log(e);
+    resp.status(500).send("서버에서 오류가 발생했습니다.");
+  }
   // upload.array(
   //   "img1",
   //   2
