@@ -2,6 +2,7 @@ const express = require("express");
 const app = express();
 const methodOverride = require("method-override");
 const bcrypt = require("bcrypt");
+require("dotenv").config();
 
 app.use(methodOverride("_method"));
 app.use(express.static(__dirname + "/public"));
@@ -23,26 +24,45 @@ app.use(
     saveUninitialized: false, // 사용자가 로그인을 하지 않아도 세션을 저장할 것인지 (false 추천)
     cookie: { maxAge: 60 * 60 * 1000 }, // 1시간 유지
     store: MongoStore.create({
-      mongoUrl:
-        "mongodb+srv://admin:!1q2w3e4r@cluster0.midgb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", // DB 접속 URl
+      mongoUrl: process.env.DB_URL, // DB 접속 URl
       dbName: "forum",
     }),
   })
 );
-
 app.use(passport.session());
+
+const { S3Client } = require("@aws-sdk/client-s3");
+const multer = require("multer");
+const multerS3 = require("multer-s3");
+const s3 = new S3Client({
+  region: "ap-northeast-2", // 서울 데이터센터에 저장할 거면 이거
+  credentials: {
+    accessKeyId: process.env.S3_KEY,
+    secretAccessKey: process.env.S3_SECRET,
+  },
+});
+
+const upload = multer({
+  storage: multerS3({
+    s3: s3,
+    bucket: "eeperfumebucket",
+    key: function (req, file, cb) {
+      console.log(req.file); // 파일명
+      cb(null, Date.now().toString()); //업로드 시 파일명 변경 가능
+    },
+  }),
+});
 
 const { MongoClient, ObjectId } = require("mongodb");
 
 let db;
-const url =
-  "mongodb+srv://admin:!1q2w3e4r@cluster0.midgb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const url = process.env.DB_URL;
 new MongoClient(url)
   .connect()
   .then((client) => {
     console.log("DB 연결 성공");
     db = client.db("forum");
-    app.listen(8080, () => {
+    app.listen(process.env.PORT, () => {
       console.log("listening on 8080");
     });
   })
@@ -50,9 +70,40 @@ new MongoClient(url)
     console.log(err);
   });
 
-app.get("/pet", (req, resp) => {
-  resp.send("펫 용품 쇼핑할 수 있는 페이지입니다.");
-});
+const checkLogin = (req, resp, next) => {
+  if (!req.user) {
+    return resp.send("로그인을 해야 합니다.");
+  }
+  next(); // 이거 안 하면 무한 대기 상태에 빠질 수 있음. 미들웨어 코드 실행 끝났으니까 다음으로 이동해 주세요.
+};
+
+const getLocaleTime = (req, resp, next) => {
+  console.log(new Date());
+  next();
+};
+
+const checkUserInfo = (req, resp, next) => {
+  // username 빈 칸이면?
+  if (!req.body.username) {
+    return resp.status(400).send("username이 입력되지 않았습니다.");
+  }
+  // password 빈 칸이면?
+  if (!req.body.password) {
+    return resp.status(400).send("password가 입력되지 않았습니다.");
+  }
+  next();
+};
+
+// app.use(checkLogin);
+// app.use("/URL", checkLogin); // 제약사항을 걸 수 있음.
+// URL과 일치하는 API get,post,put,delete 같은 요청이 들어 올 때 미들웨어 코드를 실행해 줄 수 있음.
+// 그런데 이렇게 하면 /URL 뿐만 아니라 /URL/URL/... 등 하위 모든 URL에 대해서도 적용됨.
+// 그리고 이거 밑에 있는 코드만 적용됨.
+app.use("/list", getLocaleTime);
+
+// app.get("/pet", [checkLogin, getLocaleTime, checkUserInfo], (req, resp) => {
+//   resp.send("펫 용품 쇼핑할 수 있는 페이지입니다.");
+// });
 
 app.get("/beauty", (req, resp) => {
   resp.send("뷰티 용품 쇼핑할 수 있는 페이지입니다.");
@@ -87,23 +138,40 @@ app.get("/write", (req, resp) => {
 });
 
 app.post("/add", async (req, resp) => {
+  // app.post("/add", upload.array("img1", 2), async (req, resp) => {
+  // console.log(req.file); // upload.single() 업로드 완료 시 이미지의 URL은 이 안에 들어있음
+  // console.log(req.files); // upload.array() 업로드 완료 시 이미지의 URL은 이 안에 들어있음
   // console.log(req.body);
-  try {
-    if ("" == req.body.title) {
-      return resp.send("제목이 입력되지 않았습니다.");
+  upload.single("img1")(req, resp, (err) => {
+    if (err) return resp.send("업로드 에러");
+    console.log(req.file);
+
+    try {
+      if ("" == req.body.title) {
+        return resp.send("제목이 입력되지 않았습니다.");
+      }
+      if ("" == req.body.content) {
+        return resp.send("내용이 입력되지 않았습니다.");
+      }
+      // throw new Exception("강제로 예외를 발생시켰습니다.");
+      let result = await db.collection("post").insertOne({
+        title: req.body.title,
+        content: req.body.content,
+        img: location,
+      });
+      console.log(`result: ${result}`);
+      resp.redirect("/list");
+    } catch (e) {
+      console.log(e);
+      resp.status(500).send("서버에서 오류가 발생했습니다.");
     }
-    if ("" == req.body.content) {
-      return resp.send("내용이 입력되지 않았습니다.");
-    }
-    // throw new Exception("강제로 예외를 발생시켰습니다.");
-    let result = await db
-      .collection("post")
-      .insertOne({ title: req.body.title, content: req.body.content });
-    resp.redirect("/list");
-  } catch (e) {
-    console.log(e);
-    resp.status(500).send("서버에서 오류가 발생했습니다.");
-  }
+  });
+  // upload.array(
+  //   "img1",
+  //   2
+  // )(() => {
+  //   console.log(req.files);
+  // });
 });
 
 app.get("/detail/:id", async (req, resp) => {
@@ -303,11 +371,11 @@ passport.deserializeUser(async (user, done) => {
 // passport-local은 아이디/패스워드 방식 회원 인증을 사용할 때 쓰는 라이브러리
 // express-session은 세션 만드는 걸 도와주는 라이브러리입니다.
 app.get("/login", (req, resp) => {
-  console.log(req.user);
+  // console.log(req.user);
   resp.render("login.ejs");
 });
 
-app.post("/login", (req, resp, next) => {
+app.post("/login", checkUserInfo, (req, resp, next) => {
   // 제출한 아이디/패스워드가 DB에 있는 것과 일치하는지 확인하고 세션을 생성한다.
   passport.authenticate("local", (error, user, info) => {
     console.log(`error: ${error}, user: ${user}, info: ${info}`);
@@ -348,12 +416,12 @@ app.get("/register", (req, resp) => {
   resp.render("register.ejs");
 });
 
-app.post("/register", async (req, resp) => {
+app.post("/register", checkUserInfo, async (req, resp) => {
   try {
-    // username 빈 칸이면?
-    if (!req.body.username) {
-      return resp.status(400).send("username이 입력되지 않았습니다.");
-    }
+    // // username 빈 칸이면?
+    // if (!req.body.username) {
+    //   return resp.status(400).send("username이 입력되지 않았습니다.");
+    // }
     // username이 이미 DB에 있으면?
     let result = await db
       .collection("user")
@@ -383,72 +451,3 @@ app.post("/register", async (req, resp) => {
 
   resp.redirect("/");
 });
-
-/*
-hashing
- 
-
-근데 가입시킬 때 지금은 비번을 DB에 그대로 저장하고 있는데 
-
-비번은 암호화해서 저장하는게 좋습니다.
-
-그래야 DB가 털려도 원래 비번은 알 수 없으니까요.
-
-실은 암호화라기보다는 해싱인데 해싱이 뭐냐면 어떤 문자를 다른 랜덤한 문자로 바꾸는걸 해싱이라고 합니다.
-
-SHA3-256, SHA3-512, bcrypt, scrypt, argon2 이런 여러가지 해싱 알고리즘들이 있습니다. 
-
-
-예를 들어 hello 이런 문자를 SHA3-256 알고리즘으로 해싱하면 
-
-3338be694f50c5f338814986cdf0686453a888b84f424d792af4b9202398f392
-
-이런 문자가 됩니다. 
-
-해싱된 문자보고 원래 문자를 유추할 수 없습니다.
-
-그래서 비번같은거 보관할 때 해싱해서 저장하는게 안전합니다.
-
-참고로 나중에 유저가 로그인시 제출한 비번을 DB와 비교하고 싶으면
-
-제출한 비번을 또 해싱해보면 DB와 비교가능합니다. 
-
-
-아무튼 우리는 bcrypt라는 해싱 알고리즘을 써볼건데 이거 쓰기쉽게 도와주는 라이브러리를 설치해봅시다. 
-*/
-/*
-salt 추가하면 더 안전함
-
- 
-
-비번을 해싱할 때 그냥 비번만 달랑 해싱하는게 아니라
-
-뒤에 랜덤문자를 몰래 이어붙여서 해싱하면 좀 더 안전하지않을까요? 
-
-실제로 그렇습니다. 그 랜덤문자를 salt라고 부릅니다.
-
-그래서 bcrypt 라이브러리 쓰면 자동으로 salt 넣어서 해싱해줍니다. 
-
- 
-
-정확히 말하면 salt를 쓰면 해커들이 lookup table attack, rainbow table attack이 어려워진다는 장점이 있어서 쓰는 것인데
-
-이것들이 뭐냐면 해커들이 해시를 보고 원래 비번을 쉽게 추론할 수 있게 만든 표 같은 것입니다. 
-
-
-그런데 비번을 저장할 때 salt라는 랜덤문자를 더해서 해시해버리면
-
-해커가 기존에 만들어놓은 표를 아예 못쓰고 새로 만들어야 하기 때문에 (salt를 넣어서 해싱한 표를 새로 만들어야하기 때문에)
-
-그렇게 해킹을 좀 어렵게 만드는 것에 의의가 있다고 보면 됩니다.
-
- 
-
-그래서 salt를 패스워드 옆에 함께 보관해두는데
-
-salt를 다른 별도의 DB나 하드웨어에 보관하는 곳들도 있습니다.
-
-그렇게 보관하는 salt들을 pepper라고 부르는데 거기까지는 귀찮으니까 안할거고요 
-
-아무튼 결론을 해시해서 비번을 저장하면 됩니다. 
-*/
