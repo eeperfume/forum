@@ -10,9 +10,85 @@
   <body class="grey-bg">
     <%- include('nav.ejs') %>
     <div class="detail-bg">
-      <h4><%= data?.title %></h4>
-      <p><%= data?.content %></p>
-      <img src="<%= data?.img %>" />
+      <h4><%= data.title %></h4>
+      <p><%= data.content %></p>
+      <img src="<%= data.img %>" />
+      <hr style="margin-top: 60px" />
+      <div id="comment-list">
+        <% for (let comment of comments) { %>
+        <p><strong><%= comment.writer %></strong> <%= comment.content %></p>
+        <% } %>
+      </div>
+      <!-- <form action="/comment" method="POST">
+        <input name="content" />
+        <input name="parentId" value="<%= data._id %>" style="display: none" />
+        <button type="submit">댓글작성</button>
+      </form> -->
+      <button type="submit" id="comment-send">댓글작성</button>
+      <input name="content" />
+      <input name="parentId" value="<%= data._id %>" style="display: none" />
+      <input name="username" value="<%= username %>" style="display: none" />
     </div>
   </body>
 </html>
+
+<script>
+  document
+    .querySelector("#comment-send")
+    .addEventListener("click", async () => {
+      let content = document.querySelector("input[name = content]").value;
+      let parentId = document.querySelector("input[name = parentId]").value;
+      let username = document.querySelector("input[name = username]").value;
+
+      fetch("/comment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content: content, parentId: parentId }),
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP 오류! 상태: ${response.status}`);
+          }
+
+          document.querySelector("#comment-list").childElementCount
+            ? document
+                .querySelector("#comment-list")
+                .lastElementChild.insertAdjacentHTML(
+                  "afterend",
+                  `<p><strong>${username}</strong> ${content}</p>`
+                )
+            : document
+                .querySelector("#comment-list")
+                .insertAdjacentHTML(
+                  "afterbegin",
+                  `<p><strong>${username}</strong> ${content}</p>`
+                );
+
+          document.querySelector("input[name = content]").value = null;
+
+          return response.text();
+        })
+        .then((response) => {
+          console.log(response);
+        })
+        .catch((error) => {
+          console.log(error);
+        });
+
+      // try {
+      //   const response = await fetch("/comment", {
+      //     method: "POST",
+      //     headers: {
+      //       "Content-Type": "application/json",
+      //     },
+      //     body: JSON.stringify({ content: content, parentId: parentId }),
+      //   });
+      //   const text = await response.text();
+      //   console.log(`성공: ${text}`);
+      // } catch (error) {
+      //   console.error(`실패: ${error.message}`);
+      // }
+    });
+</script>

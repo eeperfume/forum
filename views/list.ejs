@@ -9,13 +9,23 @@
 
   <body class="grey-bg">
     <%- include('nav.ejs') %>
+    <input class="search" />
+    <button class="search-send">검색</button>
+    <script>
+      document.querySelector(".search-send").addEventListener("click", () => {
+        let searchValue = document.querySelector(".search").value;
+        location.href = "/search?val=" + searchValue;
+      });
+    </script>
     <div class="white-bg">
       <% for (let data of datas) { %>
       <div class="list-box">
         <h4>
           <a href="/detail/<%= data._id %>"><%= data.title %></a>
           <a href="/edit/<%= data._id %>">✏️</a>
+          <% if (JSON.stringify(data.user) == JSON.stringify(user._id)) { %>
           <span class="delete" data-id="<%= data._id %>">🗑️</span>
+          <% } %>
         </h4>
         <p><%= data.content %></p>
       </div>
@@ -92,7 +102,9 @@
             e.target.parentElement.parentElement.remove();
           })
           .catch((error) => {
+            console.log("서버에서 오류 발생함");
             console.log(error); // 오류를 강제로 발생시킵니다.
+            alert(error.response.data);
           });
       });
     }

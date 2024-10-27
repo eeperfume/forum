@@ -54,11 +54,12 @@ const upload = multer({
 });
 
 const { MongoClient, ObjectId } = require("mongodb");
+const { route } = require("./routes/shop");
+
+let connectDB = require("./database.js");
 
 let db;
-const url = process.env.DB_URL;
-new MongoClient(url)
-  .connect()
+connectDB
   .then((client) => {
     console.log("DB 연결 성공");
     db = client.db("forum");
@@ -118,7 +119,8 @@ app.get("/", (req, resp) => {
   resp.render("index.ejs");
 });
 
-app.get("/list", async (req, resp) => {
+app.get("/list", checkLogin, async (req, resp) => {
+  resp.locals.user = req.user;
   let results = await db.collection("post").find().toArray();
   // console.log(results);
   // resp.send(results[0].title);
@@ -153,7 +155,9 @@ app.post("/add", upload.single("img1"), async (req, resp) => {
     let result = await db.collection("post").insertOne({
       title: req.body.title,
       content: req.body.content,
-      img: req.file.location,
+      img: req.file?.location,
+      user: req.user._id,
+      username: req.user.username,
     });
     console.log(`result: ${result}`);
     resp.redirect("/list");
@@ -172,6 +176,8 @@ app.post("/add", upload.single("img1"), async (req, resp) => {
 app.get("/detail/:id", async (req, resp) => {
   // console.log(req.params);
   try {
+    resp.locals.username = req.user.username;
+    console.log(req.user);
     let result = await db
       .collection("post")
       .findOne({ _id: new ObjectId(req.params.id) });
@@ -179,7 +185,12 @@ app.get("/detail/:id", async (req, resp) => {
     if (result == null) {
       resp.status(404).send("존재하지 않는 페이지입니다.");
     }
-    resp.render("detail.ejs", { data: result });
+    let results = await db
+      .collection("comment")
+      .find({ parentId: new ObjectId(req.params.id) })
+      .toArray();
+    // console.log(results);
+    resp.render("detail.ejs", { data: result, comments: results });
   } catch (e) {
     console.log(e);
     resp.status(404).send("존재하지 않는 페이지입니다.");
@@ -250,8 +261,14 @@ app.get("/abc", async (req, resp) => {
 
 app.delete("/delete", async (req, resp) => {
   // console.log(req.query);
-  await db.collection("post").deleteOne({ _id: new ObjectId(req.query.id) });
-  resp.send("삭제를 완료했습니다.");
+  let result = await db.collection("post").deleteOne({
+    _id: new ObjectId(req.query.id),
+    user: new ObjectId(req.user._id),
+  });
+  console.log(result);
+  result.deletedCount == 0
+    ? resp.status(403).send("님이 쓴 글이 아님")
+    : resp.send("삭제를 완료했습니다.");
 });
 
 // app.get("/list/1", async (req, resp) => {
@@ -445,4 +462,55 @@ app.post("/register", checkUserInfo, async (req, resp) => {
   }
 
   resp.redirect("/");
+});
+
+app.use("/shop", require("./routes/shop.js"));
+app.use("/board/sub", require("./routes/board.js"));
+
+app.get("/search", async (req, resp) => {
+  // let results = await db
+  //   .collection("post")
+  //   .find({ title: { $regex: req.query.val } }) // 정규식으로 SQL의 like 처럼 동작하게 함.
+  //   .toArray();
+  // let results = db
+  //   .collection()
+  //   .find({ $text: { $search: req.query.val } }) // index 통해서 데이터 조회 시 문법 // 숫자를 찾는 경우엔 $text 필요없음. 그냥 평소에 쓰던 문법 그대로 써도 index를 알아서 사용함.
+  //   .toArray();
+  // let results = await db
+  //   .collection("post")
+  //   .find({ title: { $regex: req.query.val } })
+  //   .explain("executionStats"); // 처리 성능울 보여줌.
+  let searchOption = [
+    {
+      $search: {
+        index: "title_index",
+        text: { query: req.query.val, path: "title" },
+      },
+    },
+    {
+      $sort: { _id: -1 }, // 검색 결과를 _id 역순으로 정렬
+    },
+    {
+      $limit: 1, // 검색 결과를 하나만 갖다주셈
+    },
+    // {
+    //   $skip: 10, // 위에서 10개를 스킵하고 다음 거 갖다주셈
+    // },
+    // { $project: { content: 1 } }, // 필드 숨기기 기능, 0이면 숨겨주셈 1이면 보여주셈
+  ];
+  let results = await db.collection("post").aggregate(searchOption).toArray();
+  resp.render("search.ejs", { datas: results });
+});
+
+app.post("/comment", async (req, resp) => {
+  console.log(req.body);
+  await db.collection("comment").insertOne({
+    content: req.body.content,
+    writerId: new ObjectId(req.user.id),
+    writer: req.user.username,
+    parentId: new ObjectId(req.body.parentId),
+  });
+  // resp.render("list.ejs");
+  // resp.redirect("back");
+  resp.send("댓글 등록을 완료했습니다.");
 });
